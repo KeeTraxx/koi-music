@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=koi-music
+GenericName=Music Player
+Comment=Listen to YouTube Music
+Exec=koi-music
+Icon=audio-x-generic
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;youtube;player;stream;
+StartupWMClass=ch.compile.koi-music
