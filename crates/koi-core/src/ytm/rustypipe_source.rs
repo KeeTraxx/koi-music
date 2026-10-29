@@ -66,6 +66,19 @@ pub(crate) fn track(t: TrackItem) -> Track {
     }
 }
 
+/// Copy duration and album into songs that lack them, from the same video in `complete`.
+fn fill_missing(songs: &mut [Track], complete: &[Track]) {
+    for song in songs.iter_mut() {
+        let Some(full) = complete.iter().find(|c| c.video_id == song.video_id) else { continue };
+        if song.duration_s.is_none() {
+            song.duration_s = full.duration_s;
+        }
+        if song.album.is_none() {
+            song.album = full.album.clone();
+        }
+    }
+}
+
 /// A song without duration and without any linked artist was not parsed properly.
 fn is_incomplete(t: &Track) -> bool {
     t.duration_s.is_none() && t.artists.iter().all(|a| a.id.is_none())
@@ -147,15 +160,30 @@ impl MusicSource for RustyPipeSource {
                     None => {}
                 }
             }
-            // For artist-like queries rustypipe misparses the top songs card (the type
-            // label "Song" ends up as the artist, no duration). Use the songs search instead.
-            if out.songs.iter().any(is_incomplete) {
-                let n = out.songs.len().max(3);
+            // rustypipe reads YouTube's song subtitles by position and misses fields when
+            // the layout changes. The songs search returns complete rows, so use it to repair.
+            if out.songs.iter().any(|t| t.duration_s.is_none()) {
                 let res = self.q().music_search::<MusicItem, _>(&query, Some(MusicSearchFilter::Tracks)).await?;
-                out.songs = res.items.items.into_iter().filter_map(search_item).filter_map(|i| match i {
-                    SearchItem::Song(t) => Some(t),
-                    _ => None,
-                }).take(n).collect();
+                let complete: Vec<Track> = res
+                    .items
+                    .items
+                    .into_iter()
+                    .filter_map(search_item)
+                    .filter_map(|i| match i {
+                        SearchItem::Song(t) => Some(t),
+                        _ => None,
+                    })
+                    .collect();
+                if out.songs.iter().any(is_incomplete) {
+                    // Artist-like queries: the top songs card is misparsed entirely (the type
+                    // label "Song" ends up as the artist). Replace it.
+                    let n = out.songs.len().max(3);
+                    out.songs = complete.into_iter().take(n).collect();
+                } else {
+                    // The top result card lacks fields its subtitle no longer has in the old
+                    // position (e.g. duration). Fill them from the same video.
+                    fill_missing(&mut out.songs, &complete);
+                }
             }
             Ok(out)
         })
@@ -278,6 +306,24 @@ mod tests {
         (dir, s)
     }
 
+    #[test]
+    fn fill_missing_copies_duration_and_album_by_video_id() {
+        let full = |id: &str| Track {
+            video_id: id.into(),
+            title: id.into(),
+            artists: vec![],
+            album: Some(AlbumRef { id: format!("al-{id}"), name: format!("Album {id}") }),
+            duration_s: Some(100),
+            thumbnail: None,
+        };
+        let mut songs = vec![Track { album: None, duration_s: None, ..full("a") }, Track { duration_s: Some(5), ..full("b") }, Track { duration_s: None, album: None, ..full("c") }];
+        fill_missing(&mut songs, &[full("b"), full("a")]);
+        assert_eq!(songs[0].duration_s, Some(100));
+        assert_eq!(songs[0].album.as_ref().map(|a| a.name.as_str()), Some("Album a"));
+        assert_eq!(songs[1].duration_s, Some(5), "existing values are kept");
+        assert_eq!(songs[2].duration_s, None, "no match: unchanged");
+    }
+
     #[tokio::test]
     #[ignore = "network"]
     async fn search_returns_songs() {
@@ -287,8 +333,8 @@ mod tests {
         for song in &res.songs {
             assert!(!song.title.is_empty() && !song.artists.is_empty() && song.thumbnail.is_some(), "{song:?}");
         }
-        // The "top result" card can lack a duration; the regular song rows have one.
-        assert!(res.songs.iter().any(|s| s.duration_s.is_some()), "{:?}", res.songs);
+        // The top result card's duration is filled in from the songs search.
+        assert!(res.songs.iter().all(|s| s.duration_s.is_some()), "{:?}", res.songs);
     }
 
     #[tokio::test]

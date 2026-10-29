@@ -28,7 +28,7 @@ See proposal.md for motivation and specs/ for the required behavior. Current sta
 ## Decisions
 
 ### D1. CI: one GitHub Actions workflow, Linux + Windows matrix
-`.github/workflows/ci.yml` runs on push and pull request with a matrix of `ubuntu-latest` and `windows-latest`: install the toolchain from `rust-toolchain.toml`, install ALSA headers on Linux only, cache with `Swatinem/rust-cache`, then `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. CI runners have no audio device; the audio tests already skip in that case.
+`.github/workflows/ci.yml` runs on branch pushes and pull requests (not on tag pushes: a tag points at a commit already tested on its branch, and the release workflow builds it) with a matrix of `ubuntu-latest` and `windows-latest`: install the toolchain from `rust-toolchain.toml`, install ALSA headers on Linux only, cache with `Swatinem/rust-cache`, then `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. CI runners have no audio device; the audio tests already skip in that case.
 *Alternative:* cross-compiling Windows from Linux (`cargo-xwin`) – rejected: it would not run the tests on Windows, and C dependencies are easier on a native MSVC runner.
 
 ### D2. Release: tag-triggered workflow using the `gh` CLI

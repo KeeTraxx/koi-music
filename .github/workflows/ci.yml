@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # Branches only: a tag points at a commit already tested on its branch, and the
+  # release workflow builds it.
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
