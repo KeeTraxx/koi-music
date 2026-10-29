@@ -12,12 +12,12 @@
 ## 3. Downloads stop on a bot check
 
 - [x] 3.1 On the first `BotCheck` failure, stop all active downloads (abort, temp cleanup, mark failed with the message) and publish one notice in `DownloadsState` (design D3); verify manager tests with a fake backend: 3 running + queued jobs all end `Failed` with the message, no further fetch calls start, no files remain in the download folder, exactly one notice, and Retry afterwards works
-- [ ] 3.2 Show the downloads notice as one toast in the app (design D4); verify manually with the fake yt-dlp fixture set as the yt-dlp path in Settings: "Download all" on an album shows one toast and all jobs failed with Retry, and playing a non-downloaded track shows one message and stops
+- [x] 3.2 Show the downloads notice as one toast in the app (design D4); verify manually with the fake yt-dlp fixture set as the yt-dlp path in Settings: "Download all" on an album shows one toast and all jobs failed with Retry, and playing a non-downloaded track shows one message and stops
 
 ## 4. Documentation and release
 
 - [x] 4.1 Describe the bot-check behavior (playback stops, downloads stop, try again later, no automatic resume) in the README next to the existing bot-check note; verify it matches the delta specs
-- [ ] 4.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`, push, and confirm CI is green on Linux and Windows
+- [x] 4.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`, push, and confirm CI is green on Linux and Windows
 - [ ] 4.3 Bump the workspace version to 0.1.1, push tag `v0.1.1`, and verify `gh release view v0.1.1` lists `koi-music-0.1.1-windows-x86_64.zip` and that it downloads without authentication
 
 ## Workflow follow-up
