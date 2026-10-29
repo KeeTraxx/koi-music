@@ -37,6 +37,24 @@ On Windows the app SHALL behave like a normal desktop application: no console wi
 - **THEN** its library is stored under `%APPDATA%`
 - **AND** the default download folder is `koi-music` inside the user's Music folder
 
+### Requirement: Windows without GPU acceleration
+On Windows the app SHALL start and be usable on systems without a 3D-capable graphics driver (for example virtual machines with a display-only driver), using software rendering when no GPU is available.
+
+#### Scenario: Virtual machine with a display-only driver
+- **WHEN** the app is started in a Windows VM whose display adapter offers no 3D acceleration
+- **THEN** the app window opens and works, rendered in software
+
+### Requirement: Startup failures are reported
+The system SHALL NOT fail silently. If the app cannot start, it SHALL tell the user why, and it SHALL write a log file that includes startup errors.
+
+#### Scenario: Startup error on Windows
+- **WHEN** the app cannot start on Windows (for example, no usable graphics renderer)
+- **THEN** a message box explains the error and names the log file
+
+#### Scenario: Log file
+- **WHEN** the app runs on any platform
+- **THEN** it writes its log to a `koi-music.log` file in its cache folder, replacing the log of the previous run
+
 ### Requirement: User-installed tools on Windows
 On Windows the app SHALL find yt-dlp (`yt-dlp.exe`) on `PATH` or at the path configured in Settings, and SHALL show the same notices as on Linux when yt-dlp or a JavaScript runtime is missing. The app SHALL NOT bundle or download these tools.
 

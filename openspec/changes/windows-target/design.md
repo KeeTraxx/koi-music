@@ -62,6 +62,15 @@ This replaces the tokio sync task on all platforms, so there is one code path. L
 - **Order:** publication comes first, so CI runs on a public repository (free standard runners) and releases are public from the first tag.
 *Alternative:* a fresh public repository instead of rewriting history – equivalent outcome, but loses the existing repo settings; rewriting a one-commit history is trivial.
 
+### D9. Renderer: wgpu on Windows, OpenGL elsewhere
+Found in a Windows VM (QEMU, "Red Hat VirtIO GPU DOD controller", a display-only driver): Windows offers only its software OpenGL 1.1 there, the glow backend needs OpenGL 2+, and the app exited silently. On Windows, eframe is built with its `wgpu` feature (target-specific dependency features) and uses `Renderer::Wgpu`; Linux keeps glow, which is verified. A `native_adapter_selector` picks a surface-compatible adapter in the order discrete GPU, integrated GPU, virtual GPU, other, CPU, so Microsoft's WARP software renderer (Direct3D 12) is used when there is no GPU. wgpu still tries its backends (DX12, Vulkan, GL) itself.
+*Alternatives:* wgpu first on all platforms – rejected by the user to keep the verified Linux path; retrying with glow after a wgpu failure – not possible, winit's event loop cannot be created twice in one process; telling VM users to install Mesa's `opengl32.dll` – a workaround, not a fix.
+
+### D10. Startup failures are visible
+- **Log file:** tracing writes to stderr and to `<cache dir>/koi-music.log` (truncated at start; `%LOCALAPPDATA%\compile\koi-music\cache\koi-music.log` on Windows, `~/.cache/koi-music/koi-music.log` on Linux), without ANSI colors in the file.
+- **Fatal errors:** if `run_native` returns an error (renderer, `AppCore::start`), it is logged and, on Windows, shown in a message box (`MessageBoxW` via `windows-sys`) that names the log file. A panic hook logs panics the same way, so a crash in the GUI subsystem build is never silent.
+- This corrects an oversight of D3: hiding the console removed the only place errors appeared.
+
 ## Risks / Trade-offs
 
 - [Windows runtime behavior is unverified] → Accepted (user decision). CI catches build and unit-test failures; the README marks Windows as "CI-tested, not manually verified" until someone runs the checklist.

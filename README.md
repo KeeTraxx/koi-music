@@ -60,6 +60,10 @@ nix profile install nixpkgs#yt-dlp nixpkgs#deno nixpkgs#ffmpeg
 
 If yt-dlp is installed somewhere not on `PATH`, set the full path to `yt-dlp.exe` in *Settings*.
 
+On Windows, koi-music renders with Direct3D. Without a GPU driver (for example in a virtual machine with
+a display-only graphics driver) it falls back to Windows' built-in software renderer, which works but
+uses more CPU. If the app cannot start, it shows a message with the reason and the log file location.
+
 ## Building
 
 Requirements: Rust (the version in `rust-toolchain.toml`, installed automatically by rustup), `pkg-config`
@@ -105,10 +109,11 @@ install -Dm644 ch.compile.koi-music.desktop ~/.local/share/applications/ch.compi
 | Library (playlists, history, downloads, settings) | `~/.local/share/koi-music/library.db` |
 | YouTube client cache | `~/.local/share/koi-music/rustypipe/` |
 | Downloads (default, configurable) | `~/Music/koi-music/` |
+| Log of the last run | `~/.cache/koi-music/koi-music.log` |
 
 On Windows the library and client cache live in `%APPDATA%\compile\koi-music\data\`, other
-caches in `%LOCALAPPDATA%\compile\koi-music\cache\`, and downloads go to `koi-music` in your
-Music folder.
+caches and the log (`koi-music.log`) in `%LOCALAPPDATA%\compile\koi-music\cache\`, and downloads
+go to `koi-music` in your Music folder.
 
 ## Project layout
 

@@ -31,6 +31,13 @@
 - [x] 5.1 With the user's go-ahead, push tag `v0.1.0` and check the published release: `gh release view v0.1.0` lists `koi-music-0.1.0-windows-x86_64.zip`, the zip contains `koi-music.exe`, `README.md` and `LICENSE`, and the asset downloads without authentication (`curl -fLO` on its public URL)
 - [x] 5.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` locally and confirm the latest CI run is green on Linux and Windows
 
+## 6. Windows startup robustness
+
+- [ ] 6.1 Write the log to `<cache dir>/koi-music.log` (truncated per start) in addition to stderr, and report fatal startup errors and panics in the log and, on Windows, in a message box naming the log file (design D10); verify on Linux that the log file is written and that a forced startup error is logged with its reason, and that the Windows code compiles in CI
+- [ ] 6.2 Build eframe with wgpu on Windows only, use the wgpu renderer there with an adapter selector that falls back to the software (WARP) adapter (design D9); verify Linux still uses glow (unchanged `cargo tree` for Linux), CI is green on both platforms, and the release dry-run zip builds
+- [x] 6.3 Document the log file location and the software-rendering behavior in the README; verify the paths match design D10
+- [ ] 6.4 The user starts the dry-run build in the Windows VM (display-only VirtIO GPU driver); verify the window opens and a track plays, or that the message box reports the failure
+
 ## Workflow follow-up
 
 - Manual Windows verification (playback, media keys, fonts, downloads, no console window) remains open by decision; run it when a Windows machine is available.
