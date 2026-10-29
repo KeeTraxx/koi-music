@@ -43,6 +43,15 @@ impl FilteredList {
     }
 }
 
+fn filter_icon(f: SearchFilter) -> &'static str {
+    match f {
+        SearchFilter::Songs => "🎵",
+        SearchFilter::Albums => "💿",
+        SearchFilter::Artists => "👤",
+        SearchFilter::Playlists => "☰",
+    }
+}
+
 fn item_key(item: &SearchItem) -> String {
     match item {
         SearchItem::Song(t) => format!("s:{}", t.video_id),
@@ -143,10 +152,12 @@ impl SearchView {
         self.poll();
 
         let mut submit = false;
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
             let edit = egui::TextEdit::singleline(&mut self.query)
                 .hint_text("Search songs, albums, artists, playlists")
-                .desired_width(ui.available_width() - 90.0);
+                .margin(egui::vec2(8.0, 6.0))
+                .desired_width(ui.available_width() - 100.0);
             let resp = ui.add(edit);
             if std::mem::take(&mut self.focus_query) {
                 resp.request_focus();
@@ -157,18 +168,21 @@ impl SearchView {
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 submit = true;
             }
-            if ui.button("🔍 Search").clicked() {
+            // As tall as the query box.
+            let search = egui::Button::new("🔍 Search").min_size(egui::vec2(0.0, resp.rect.height()));
+            if ui.add(search).clicked() {
                 submit = true;
             }
             self.suggestions_popup(&resp, &mut submit);
         });
         self.debounce_suggestions(ui, sp, cx);
+        ui.add_space(4.0);
 
         ui.horizontal(|ui| {
             let before = self.filter;
-            ui.selectable_value(&mut self.filter, None, "All");
+            ui.selectable_value(&mut self.filter, None, "✱ All");
             for f in SearchFilter::ALL {
-                ui.selectable_value(&mut self.filter, Some(f), f.label());
+                ui.selectable_value(&mut self.filter, Some(f), format!("{} {}", filter_icon(f), f.label()));
             }
             if self.filter != before && self.active.is_some() {
                 submit = true;

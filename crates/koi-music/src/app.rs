@@ -92,7 +92,6 @@ pub struct KoiMusicApp {
     core: AppCore,
     sp: Spawner,
     route: Route,
-    back: Vec<Route>,
     search: SearchView,
     settings: SettingsView,
     now: player::NowPlaying,
@@ -115,7 +114,6 @@ impl KoiMusicApp {
             core,
             sp,
             route: Route::Search,
-            back: Vec::new(),
             search: SearchView::new(),
             settings: SettingsView::default(),
             now: player::NowPlaying::default(),
@@ -160,11 +158,7 @@ impl KoiMusicApp {
                 Route::Detail(target, Box::new(page))
             }
         };
-        let old = std::mem::replace(&mut self.route, route);
-        self.back.push(old);
-        if self.back.len() > 50 {
-            self.back.remove(0);
-        }
+        self.route = route;
     }
 
     fn handle(&mut self, action: Action, lib: &Arc<LibrarySnapshot>, player: &Arc<PlayerState>) {
@@ -422,7 +416,7 @@ impl eframe::App for KoiMusicApp {
         }
         let mut out = Vec::new();
         {
-            let Self { core, sp, route, back, search, settings, now, .. } = self;
+            let Self { core, sp, route, search, settings, now, .. } = self;
             let cx = Ctx { core, lib: lib.clone(), player: player.clone(), can_stream: core.tool().is_usable() };
 
             egui::Panel::bottom("now-playing").exact_size(84.0).show(ui, |ui| {
@@ -437,12 +431,14 @@ impl eframe::App for KoiMusicApp {
                     player::queue_ui(ui, &cx, &mut out);
                 });
             }
+            // Added after the queue panel so it sits on the queue's inner edge (or the window edge when closed).
+            egui::Panel::right("queue-handle")
+                .exact_size(player::QUEUE_HANDLE_WIDTH)
+                .resizable(false)
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(0.0))
+                .show(ui, |ui| player::queue_handle(ui, &mut now.queue_open));
             egui::CentralPanel::default_margins().show(ui, |ui| {
                 banners(ui, cx.core);
-                if !back.is_empty() && ui.button("⬅ Back").clicked()
-                    && let Some(prev) = back.pop() {
-                        *route = prev;
-                    }
                 match route {
                     Route::Search => search.ui(ui, sp, &cx, &mut out),
                     Route::Detail(_, page) => page.ui(ui, sp, &cx, &mut out),
