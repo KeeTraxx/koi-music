@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 use crate::audio::{AudioEvent, AudioInput, AudioOutput, LoadId};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::library::{Library, keys};
 use crate::model::Track;
 use crate::notify::Notifier;
@@ -504,7 +504,15 @@ impl Actor {
     }
 
     /// The current track cannot be played: report it and skip to the next one.
+    /// A bot check is a network-wide block, so it stops instead (retrying the
+    /// rest of the queue would only add requests); pressing play retries.
     fn fail_current(&mut self, error: Error) {
+        if error.kind == ErrorKind::BotCheck {
+            self.report(error.message);
+            self.consecutive_failures = 0;
+            self.stop();
+            return;
+        }
         let title = self.queue.current().map(|i| i.track.title.clone()).unwrap_or_default();
         self.report(format!("Cannot play \"{title}\": {error}"));
         self.consecutive_failures += 1;
@@ -682,6 +690,45 @@ mod tests {
         let s = h.player.state();
         let err = s.last_error.as_ref().expect("error shown");
         assert!(err.message.contains("Title b"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn bot_check_stops_playback_and_play_retries() {
+        let src = FakeSource::new();
+        *src.bot_check.lock().unwrap() = true;
+        let mut h = harness_with(src, Library::open_in_memory().unwrap());
+        let ids: Vec<String> = (0..10).map(|i| format!("t{i}")).collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        h.player.send(PlayerCmd::PlayTracks { tracks: tracks(&ids), start: 0 });
+        let s = h.wait("stopped with error", |s| s.status == Status::Stopped && s.last_error.is_some()).await;
+        assert_eq!(s.last_error.as_ref().unwrap().message, crate::ytdlp::BOT_CHECK_MESSAGE, "message without track prefix");
+        assert_eq!(s.current_track().unwrap().video_id, "t0", "stays on the track");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let calls: usize = h.source.stream_calls.lock().unwrap().values().sum();
+        assert_eq!(calls, 1, "the rest of the queue is not tried");
+        assert_eq!(h.player.state().last_error.as_ref().unwrap().seq, 1, "one error");
+        // Later: the block is gone and the user presses play.
+        *h.source.bot_check.lock().unwrap() = false;
+        h.player.send(PlayerCmd::Play);
+        let (_, input) = h.next_load().await;
+        assert_eq!(stream_url(&input), "https://stream/t0");
+    }
+
+    #[tokio::test]
+    async fn downloaded_track_plays_during_bot_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("b.m4a");
+        std::fs::write(&file, b"x").unwrap();
+        let lib = Library::open_in_memory().unwrap();
+        lib.add_download(&track("b"), &file, 1).unwrap();
+        let src = FakeSource::new();
+        *src.bot_check.lock().unwrap() = true;
+        let mut h = harness_with(src, lib);
+        h.player.send(PlayerCmd::PlayTracks { tracks: tracks(&["a", "b"]), start: 0 });
+        h.wait("stopped on a", |s| s.status == Status::Stopped && s.last_error.is_some()).await;
+        h.player.send(PlayerCmd::Next);
+        let (_, input) = h.start().await;
+        assert_eq!(input, AudioInput::File(file));
     }
 
     #[tokio::test]

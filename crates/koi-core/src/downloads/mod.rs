@@ -94,6 +94,14 @@ pub struct Job {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DownloadsState {
     pub jobs: Vec<Job>,
+    /// Latest notice for the user (e.g. downloads stopped by a bot check); `seq` grows per notice.
+    pub notice: Option<DownloadNotice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadNotice {
+    pub seq: u64,
+    pub message: String,
 }
 
 struct Entry {
@@ -117,6 +125,7 @@ struct Inner {
     last_progress: Mutex<Instant>,
     /// A delayed publish is scheduled (so throttled progress is not lost).
     flush_pending: AtomicBool,
+    notice: Mutex<Option<DownloadNotice>>,
 }
 
 /// Handle to the download manager. Cheap to clone; must be used inside a tokio runtime.
@@ -151,6 +160,7 @@ impl Manager {
                 next_id: AtomicU64::new(1),
                 last_progress: Mutex::new(Instant::now()),
                 flush_pending: AtomicBool::new(false),
+                notice: Mutex::new(None),
             }),
         }
     }
@@ -307,15 +317,44 @@ impl Inner {
             let temp = inner.temp_dir(run);
             let result = inner.process(id, run, &track, &temp).await;
             remove_temp(&temp).await;
-            let state = match result {
-                Ok(()) => JobState::Completed,
+            let (state, bot_check) = match result {
+                Ok(()) => (JobState::Completed, None),
                 Err(e) => {
                     tracing::warn!("download of {} failed: {e}", track.video_id);
-                    JobState::Failed(e.to_string())
+                    let bot_check = (e.kind == ErrorKind::BotCheck).then(|| e.to_string());
+                    (JobState::Failed(e.to_string()), bot_check)
                 }
             };
-            inner.set_state(id, run, state);
+            // Only the first job to hit a bot check gets here; the others are aborted below.
+            if inner.set_state(id, run, state) && let Some(message) = bot_check {
+                inner.stop_all(&message);
+            }
         }));
+    }
+
+    /// YouTube blocks this network for now (bot check): stop every queued and running
+    /// download instead of letting each one hit the block, and tell the user once.
+    /// Nothing resumes automatically; stopped jobs can be retried.
+    fn stop_all(&self, message: &str) {
+        {
+            let mut entries = self.entries.lock().unwrap();
+            for e in entries.iter_mut().filter(|e| e.job.state.is_active()) {
+                e.job.state = JobState::Failed(message.to_owned());
+                let run = std::mem::replace(&mut e.run, 0); // ignore anything the aborted attempt reports
+                if let Some(handle) = e.handle.take() {
+                    handle.abort();
+                    let temp = self.temp_dir(run);
+                    tokio::spawn(async move {
+                        let _ = handle.await; // the yt-dlp child is killed when the task is dropped
+                        remove_temp(&temp).await;
+                    });
+                }
+            }
+            let mut notice = self.notice.lock().unwrap();
+            let seq = notice.as_ref().map_or(1, |n| n.seq + 1);
+            *notice = Some(DownloadNotice { seq, message: format!("Downloads stopped. {message}") });
+        }
+        self.publish();
     }
 
     async fn process(self: &Arc<Self>, id: JobId, run: u64, track: &Track, temp: &Path) -> Result<()> {
@@ -401,7 +440,8 @@ impl Inner {
             // Send under the lock so concurrent publishes cannot arrive out of order.
             let entries = self.entries.lock().unwrap();
             let jobs = entries.iter().map(|e| e.job.clone()).collect();
-            self.state_tx.send_replace(Arc::new(DownloadsState { jobs }));
+            let notice = self.notice.lock().unwrap().clone();
+            self.state_tx.send_replace(Arc::new(DownloadsState { jobs, notice }));
         }
         self.notifier.notify();
     }
@@ -421,6 +461,9 @@ pub(crate) mod fake {
         pub release: Notify,
         /// Video ids that fail with a network error (once each).
         pub fail_once: Mutex<HashSet<String>>,
+        /// Video ids that fail with YouTube's bot check at 50%, once `bot_check_now` is notified.
+        pub bot_check: Mutex<HashSet<String>>,
+        pub bot_check_now: Notify,
         pub calls: Mutex<HashMap<String, usize>>,
     }
 
@@ -436,6 +479,11 @@ pub(crate) mod fake {
                 progress(half as u64, Some(total));
                 if self.fail_once.lock().unwrap().remove(video_id) {
                     return Err(Error::network("connection reset"));
+                }
+                let bot_check = self.bot_check.lock().unwrap().contains(video_id);
+                if bot_check {
+                    self.bot_check_now.notified().await;
+                    return Err(Error::new(ErrorKind::BotCheck, crate::ytdlp::BOT_CHECK_MESSAGE));
                 }
                 let held = self.hold.lock().unwrap().contains(video_id);
                 if held {
@@ -487,7 +535,9 @@ mod tests {
         /// All files below the download dir, relative.
         fn files(&self) -> Vec<String> {
             fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
-                for e in std::fs::read_dir(dir).unwrap().flatten() {
+                // Folders can disappear while cleanup runs.
+                let Ok(entries) = std::fs::read_dir(dir) else { return };
+                for e in entries.flatten() {
                     let p = e.path();
                     if p.is_dir() {
                         walk(&p, base, out);
@@ -576,6 +626,44 @@ mod tests {
         h.wait("completed", |s| state_of(s, id) == JobState::Completed).await;
         assert_eq!(h.backend.calls.lock().unwrap()["a"], 2);
         assert!(h.lib.snapshot().is_downloaded("a"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bot_check_stops_all_downloads_once() {
+        let mut h = harness(3);
+        h.backend.bot_check.lock().unwrap().insert("a".into());
+        // "a" runs first; the others never finish on their own (which two get the free
+        // slots is up to the scheduler).
+        let others = ["b", "c", "d", "e", "f"];
+        h.hold(&others);
+        h.mgr.download(track("a"));
+        h.wait("a running", |s| matches!(s.jobs[0].state, JobState::Downloading { .. })).await;
+        h.mgr.download_all(others.iter().map(|i| track(i)));
+        h.wait("3 running", |s| s.jobs.iter().filter(|j| matches!(j.state, JobState::Downloading { .. })).count() == 3).await;
+        h.backend.bot_check_now.notify_one(); // stored if "a" is not waiting yet
+        let s = h.wait("all failed", |s| s.jobs.iter().all(|j| matches!(j.state, JobState::Failed(_)))).await;
+        let message = crate::ytdlp::BOT_CHECK_MESSAGE;
+        assert!(s.jobs.iter().all(|j| j.state == JobState::Failed(message.to_owned())), "{:?}", s.jobs);
+        assert_eq!(s.notice.as_ref().map(|n| n.seq), Some(1), "one notice");
+        assert!(s.notice.as_ref().unwrap().message.contains(message));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !h.files().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("partial files removed");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let fetched: HashSet<String> = h.backend.calls.lock().unwrap().keys().cloned().collect();
+        assert_eq!(fetched.len(), 3, "only the 3 running jobs were fetched, queued ones never started: {fetched:?}");
+        assert!(fetched.contains("a"));
+        assert!(h.mgr.state().jobs.iter().all(|j| !j.state.is_active()), "nothing resumes");
+        // The block is over: Retry works.
+        h.backend.hold.lock().unwrap().remove("d");
+        let d = s.jobs.iter().find(|j| j.track.video_id == "d").unwrap().id;
+        h.mgr.retry(d);
+        h.wait("d completed", |s| s.jobs.iter().any(|j| j.id == d && j.state == JobState::Completed)).await;
+        assert_eq!(h.mgr.state().notice.as_ref().map(|n| n.seq), Some(1), "no new notice");
     }
 
     #[tokio::test(flavor = "multi_thread")]

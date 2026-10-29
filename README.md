@@ -33,6 +33,12 @@ yt-dlp **plugins** still load. If you often see *"Sign in to confirm you're not 
 PO-token provider plugin (for example [bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider))
 can help. These checks depend on your IP address's reputation and affect every YouTube client.
 
+When YouTube shows this check, koi-music says that YouTube is limiting requests and to try again later.
+Playback stops on the current track instead of skipping through the queue (press play to try again), and
+all queued and running downloads stop and show as failed (use *Retry* later). Nothing resumes
+automatically, so the app does not keep sending requests while the block lasts. Downloaded tracks keep
+playing.
+
 Examples:
 
 ```sh

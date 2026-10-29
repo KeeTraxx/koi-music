@@ -46,10 +46,15 @@ struct FormatJson {
 /// Appended to errors that an outdated yt-dlp commonly causes.
 const UPDATE_HINT: &str = "If this keeps happening, update yt-dlp.";
 
+/// Shown when YouTube asks to "confirm you're not a bot" (an IP/rate block, not a broken track).
+pub const BOT_CHECK_MESSAGE: &str =
+    "YouTube is temporarily limiting requests from your network (it asks to confirm you're not a bot). Try again later.";
+
 /// Map yt-dlp's stderr to an error, recognizing YouTube's bot check.
 fn classify_failure(stderr: &str) -> Error {
     let mut e = classify_failure_kind(stderr);
-    if matches!(e.kind, ErrorKind::Unavailable | ErrorKind::BotCheck) {
+    // Updating yt-dlp often fixes "unavailable", but not an IP-based bot check.
+    if e.kind == ErrorKind::Unavailable {
         e.message = format!("{} {UPDATE_HINT}", e.message);
     }
     e
@@ -59,10 +64,7 @@ fn classify_failure_kind(stderr: &str) -> Error {
     let line = stderr.lines().rev().find(|l| l.contains("ERROR")).unwrap_or(stderr).trim();
     let lower = line.to_lowercase();
     if lower.contains("not a bot") || lower.contains("sign in to confirm") {
-        Error::new(
-            ErrorKind::BotCheck,
-            "YouTube asks to confirm you're not a bot. Try again later or from another network.",
-        )
+        Error::new(ErrorKind::BotCheck, BOT_CHECK_MESSAGE)
     } else if lower.contains("unavailable") || lower.contains("requested format is not available") || lower.contains("private video") {
         Error::unavailable(line.trim_start_matches("ERROR: ").to_owned())
     } else if lower.contains("unable to download") || lower.contains("timed out") || lower.contains("getaddrinfo") {
@@ -308,7 +310,8 @@ mod tests {
     fn bot_check_is_recognized() {
         let e = classify_failure("ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies");
         assert_eq!(e.kind, ErrorKind::BotCheck);
-        assert!(e.message.ends_with(UPDATE_HINT));
+        assert_eq!(e.message, BOT_CHECK_MESSAGE, "no update hint for bot checks");
+        assert_eq!(e.to_string(), BOT_CHECK_MESSAGE, "shown without a prefix");
         let e = classify_failure("ERROR: [youtube] abc: Video unavailable");
         assert_eq!(e.kind, ErrorKind::Unavailable);
         assert!(e.message.ends_with(UPDATE_HINT));
@@ -361,6 +364,22 @@ mod tests {
         // The ffmpeg container fixup (when ffmpeg is installed) changes the size slightly.
         let size = std::fs::metadata(&path).unwrap().len();
         assert!(last > 0 && size.abs_diff(last) < last / 100, "size {size}, downloaded {last}");
+    }
+
+    /// The fixture script stands in for yt-dlp and always hits the bot check.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bot_check_from_fake_yt_dlp() {
+        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-yt-dlp-botcheck.sh");
+        let y = YtDlp::new(bin);
+        let status = y.probe().await.unwrap();
+        assert_eq!(status.version, "2026.01.01");
+        assert_eq!(status.js_runtimes, ["deno-2.0.0"]);
+        let e = y.resolve("abcdefghijk").await.unwrap_err();
+        assert_eq!((e.kind, e.message.as_str()), (ErrorKind::BotCheck, BOT_CHECK_MESSAGE));
+        let dir = tempfile::tempdir().unwrap();
+        let e = y.download("abcdefghijk", dir.path(), |_, _| {}).await.unwrap_err();
+        assert_eq!((e.kind, e.message.as_str()), (ErrorKind::BotCheck, BOT_CHECK_MESSAGE));
     }
 
     #[tokio::test]

@@ -36,6 +36,8 @@ impl fmt::Display for Error {
             ErrorKind::Io => "File error",
             ErrorKind::Cancelled => "Cancelled",
             ErrorKind::MissingTool => "Required tool not found",
+            // The message is a complete sentence (see `ytdlp::BOT_CHECK_MESSAGE`).
+            ErrorKind::BotCheck if !self.message.is_empty() => return f.write_str(&self.message),
             ErrorKind::BotCheck => "YouTube bot check",
             ErrorKind::Invalid => "Invalid input",
             ErrorKind::Audio => "Audio error",
@@ -129,7 +131,7 @@ mod tests {
             (ErrorKind::Io, "File error: offline"),
             (ErrorKind::Cancelled, "Cancelled: offline"),
             (ErrorKind::MissingTool, "Required tool not found: offline"),
-            (ErrorKind::BotCheck, "YouTube bot check: offline"),
+            (ErrorKind::BotCheck, "offline"),
             (ErrorKind::Invalid, "Invalid input: offline"),
             (ErrorKind::Audio, "Audio error: offline"),
         ];

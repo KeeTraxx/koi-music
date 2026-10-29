@@ -101,6 +101,8 @@ pub struct KoiMusicApp {
     toast_tx: mpsc::UnboundedSender<String>,
     toast_rx: mpsc::UnboundedReceiver<String>,
     last_error_seq: u64,
+    /// Last downloads notice shown (e.g. "downloads stopped" after a bot check).
+    last_download_notice_seq: u64,
     /// OS media controls; `None` when the platform service is unavailable.
     media: Option<MediaSession>,
 }
@@ -122,6 +124,7 @@ impl KoiMusicApp {
             toast_tx,
             toast_rx,
             last_error_seq: 0,
+            last_download_notice_seq: 0,
             media,
         }
     }
@@ -411,6 +414,12 @@ impl eframe::App for KoiMusicApp {
                 self.last_error_seq = e.seq;
                 self.toast(e.message.clone());
             }
+        if let Some(n) = &self.core.downloads.state().notice
+            && n.seq != self.last_download_notice_seq
+        {
+            self.last_download_notice_seq = n.seq;
+            self.toast(n.message.clone());
+        }
         let mut out = Vec::new();
         {
             let Self { core, sp, route, back, search, settings, now, .. } = self;

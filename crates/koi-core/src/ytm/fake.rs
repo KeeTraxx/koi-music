@@ -15,6 +15,8 @@ pub struct FakeSource {
     pub artists: Mutex<HashMap<String, ArtistDetail>>,
     /// Video ids that have no playable stream.
     pub unavailable: Mutex<Vec<String>>,
+    /// While set, every stream request fails with YouTube's bot check.
+    pub bot_check: Mutex<bool>,
     /// Number of audio_stream calls per video id.
     pub stream_calls: Mutex<HashMap<String, usize>>,
     /// Page size for paginated responses.
@@ -135,8 +137,12 @@ impl MusicSource for FakeSource {
     fn audio_stream(&self, video_id: &str) -> BoxFut<'_, AudioStream> {
         *self.stream_calls.lock().unwrap().entry(video_id.to_owned()).or_default() += 1;
         let unavailable = self.unavailable.lock().unwrap().iter().any(|v| v == video_id);
+        let bot_check = *self.bot_check.lock().unwrap();
         let id = video_id.to_owned();
         Box::pin(async move {
+            if bot_check {
+                return Err(Error::new(ErrorKind::BotCheck, crate::ytdlp::BOT_CHECK_MESSAGE));
+            }
             if unavailable {
                 return Err(Error::unavailable(format!("{id} is region-blocked")));
             }
