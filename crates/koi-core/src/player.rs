@@ -838,7 +838,16 @@ mod tests {
             let mut h = harness_with(FakeSource::new(), Library::open(&path).unwrap());
             h.player.send(PlayerCmd::SetVolume(0.4));
             h.wait("volume", |s| s.volume == 0.4).await;
-            tokio::time::sleep(Duration::from_millis(100)).await; // saved on a blocking thread
+            // Saved on a blocking thread (volume, then muted); wait for both instead of a fixed delay.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !(h.library.setting::<f32>(keys::VOLUME).unwrap() == Some(0.4)
+                    && h.library.setting::<bool>(keys::MUTED).unwrap().is_some())
+                {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("volume saved");
         }
         let h = harness_with(FakeSource::new(), Library::open(&path).unwrap());
         assert_eq!(h.player.state().volume, 0.4);
