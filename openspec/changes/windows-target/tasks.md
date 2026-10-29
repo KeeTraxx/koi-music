@@ -27,8 +27,8 @@
 
 ## 5. Integration
 
-- [ ] 5.1 With the user's go-ahead, push tag `v0.1.0` and check the published release: `gh release view v0.1.0` lists `koi-music-0.1.0-windows-x86_64.zip`, the zip contains `koi-music.exe`, `README.md` and `LICENSE`, and the asset downloads without authentication (`curl -fLO` on its public URL)
-- [ ] 5.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` locally and confirm the latest CI run is green on Linux and Windows
+- [x] 5.1 With the user's go-ahead, push tag `v0.1.0` and check the published release: `gh release view v0.1.0` lists `koi-music-0.1.0-windows-x86_64.zip`, the zip contains `koi-music.exe`, `README.md` and `LICENSE`, and the asset downloads without authentication (`curl -fLO` on its public URL)
+- [x] 5.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` locally and confirm the latest CI run is green on Linux and Windows
 
 ## Workflow follow-up
 
