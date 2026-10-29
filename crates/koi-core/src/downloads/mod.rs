@@ -658,6 +658,15 @@ mod tests {
         h.wait("a running", |s| matches!(s.jobs[0].state, JobState::Downloading { .. })).await;
         h.mgr.download_all(others.iter().map(|i| track(i)));
         h.wait("3 running", |s| s.jobs.iter().filter(|j| matches!(j.state, JobState::Downloading { .. })).count() == 3).await;
+        // A job is "Downloading" before it reaches the backend; on a slow machine the bot
+        // check could otherwise abort one before its fetch is recorded.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while h.backend.calls.lock().unwrap().len() < 3 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("3 fetches started");
         h.backend.bot_check_now.notify_one(); // stored if "a" is not waiting yet
         let s = h.wait("all failed", |s| s.jobs.iter().all(|j| matches!(j.state, JobState::Failed(_)))).await;
         let message = crate::ytdlp::BOT_CHECK_MESSAGE;
