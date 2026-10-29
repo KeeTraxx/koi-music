@@ -10,8 +10,8 @@ No account, no browser tab, no ads.
 - Media keys and now-playing info (MPRIS on Linux, system media controls on Windows)
 
 Platforms: **Linux** (x86_64) and **Windows 10/11** (x86_64). Windows builds and tests run in CI
-on every push, but the Windows app has not been manually verified yet (playback, media keys, fonts,
-downloads). Reports welcome. macOS is not supported.
+on every push; the Windows app has been tested by hand in a virtual machine (software rendering),
+not yet on a physical PC with a GPU. Reports welcome. macOS is not supported.
 
 > **Personal use only.** Streaming and downloading via unofficial APIs may conflict with YouTube's Terms of Service.
 > koi-music is an independent project. It is not affiliated with, endorsed by, or sponsored by Google or YouTube.
