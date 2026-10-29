@@ -1,4 +1,6 @@
-//! Downloads: active/recent jobs and the downloaded tracks.
+//! Downloads: queued, running and failed jobs, and the downloaded tracks.
+
+use std::path::Path;
 
 use eframe::egui::{self, RichText, Ui};
 use koi_core::downloads::{Job, JobState};
@@ -12,9 +14,11 @@ pub fn downloads_ui(ui: &mut Ui, cx: &Ctx, out: &mut Vec<Action>) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Downloads").heading().strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(jobs.jobs.iter().any(|j| !j.state.is_active()), egui::Button::new("Clear finished")).clicked() {
-                cx.core.downloads.clear_finished();
-            }
+            let dir = cx.core.downloads.dir();
+            if ui.button("📂 Open Directory").on_hover_text(dir.display().to_string()).clicked()
+                && let Err(e) = open_in_file_manager(&dir) {
+                    out.push(Action::Toast(format!("Could not open {}: {e}", dir.display())));
+                }
         });
     });
     ui.label(RichText::new(format!("Folder: {}", cx.core.downloads.dir().display())).weak().small());
@@ -68,9 +72,6 @@ fn job_row(ui: &mut Ui, cx: &Ctx, job: &Job) {
                         let f = job.state.fraction().unwrap_or(0.0);
                         ui.add(egui::ProgressBar::new(f).show_percentage().desired_height(12.0));
                     }
-                    JobState::Completed => {
-                        ui.label(RichText::new("✔ Completed").small());
-                    }
                     JobState::Failed(e) => {
                         let msg = RichText::new(format!("Failed: {e}")).small();
                         ui.add(egui::Label::new(msg.color(ui.visuals().error_fg_color)).truncate())
@@ -83,6 +84,21 @@ fn job_row(ui: &mut Ui, cx: &Ctx, job: &Job) {
             });
         });
     });
+}
+
+/// Show `dir` in the OS file manager, creating it first (it only exists after the first download).
+fn open_in_file_manager(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let program = "xdg-open";
+    let mut child = std::process::Command::new(program).arg(dir).spawn()?;
+    // Reap the launcher; its exit code is not meaningful (explorer.exe returns 1 on success).
+    std::thread::spawn(move || child.wait());
+    Ok(())
 }
 
 /// Short status for the navigation panel, e.g. "2 active".

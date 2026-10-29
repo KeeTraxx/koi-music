@@ -63,7 +63,6 @@ pub type JobId = u64;
 pub enum JobState {
     Queued,
     Downloading { done: u64, total: Option<u64> },
-    Completed,
     Failed(String),
     Cancelled,
 }
@@ -77,7 +76,6 @@ impl JobState {
     pub fn fraction(&self) -> Option<f32> {
         match self {
             Self::Downloading { done, total: Some(t) } if *t > 0 => Some((*done as f32 / *t as f32).min(1.0)),
-            Self::Completed => Some(1.0),
             _ => None,
         }
     }
@@ -261,16 +259,6 @@ impl Manager {
         self.inner.publish();
     }
 
-    /// Remove completed and cancelled jobs from the list.
-    pub fn clear_finished(&self) {
-        self.inner
-            .entries
-            .lock()
-            .unwrap()
-            .retain(|e| !matches!(e.job.state, JobState::Completed | JobState::Cancelled));
-        self.inner.publish();
-    }
-
     /// Delete a downloaded file and forget it. The track stays in playlists (and streams again).
     pub async fn delete(&self, video_id: &str) -> Result<()> {
         if let Some(d) = self.inner.library.snapshot().downloads.get(video_id) {
@@ -317,17 +305,16 @@ impl Inner {
             let temp = inner.temp_dir(run);
             let result = inner.process(id, run, &track, &temp).await;
             remove_temp(&temp).await;
-            let (state, bot_check) = match result {
-                Ok(()) => (JobState::Completed, None),
-                Err(e) => {
-                    tracing::warn!("download of {} failed: {e}", track.video_id);
-                    let bot_check = (e.kind == ErrorKind::BotCheck).then(|| e.to_string());
-                    (JobState::Failed(e.to_string()), bot_check)
-                }
+            let e = match result {
+                // The track is in the library now and listed with the downloaded tracks.
+                Ok(()) => return inner.remove(id, run),
+                Err(e) => e,
             };
+            tracing::warn!("download of {} failed: {e}", track.video_id);
+            let bot_check = e.kind == ErrorKind::BotCheck;
             // Only the first job to hit a bot check gets here; the others are aborted below.
-            if inner.set_state(id, run, state) && let Some(message) = bot_check {
-                inner.stop_all(&message);
+            if inner.set_state(id, run, JobState::Failed(e.to_string())) && bot_check {
+                inner.stop_all(&e.to_string());
             }
         }));
     }
@@ -409,6 +396,18 @@ impl Inner {
         drop(entries);
         self.publish();
         true
+    }
+
+    /// Drop a finished job from the list (if this attempt is still the current one).
+    fn remove(&self, id: JobId, run: u64) {
+        let mut entries = self.entries.lock().unwrap();
+        let before = entries.len();
+        entries.retain(|e| !(e.job.id == id && e.run == run));
+        let removed = entries.len() != before;
+        drop(entries);
+        if removed {
+            self.publish();
+        }
     }
 
     fn progress(self: &Arc<Self>, id: JobId, run: u64, done: u64, total: Option<u64>) {
@@ -557,13 +556,18 @@ mod tests {
         s.jobs.iter().find(|j| j.id == id).unwrap().state.clone()
     }
 
+    /// A successful download leaves the list.
+    fn finished(s: &DownloadsState, id: JobId) -> bool {
+        !s.jobs.iter().any(|j| j.id == id)
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn downloads_tags_and_records() {
         let mut h = harness(3);
         let mut t = track("a");
         t.thumbnail = None;
         let id = h.mgr.download(t).unwrap();
-        h.wait("completed", |s| state_of(s, id) == JobState::Completed).await;
+        h.wait("completed", |s| finished(s, id)).await;
         assert_eq!(h.files(), ["Artist - Title a.m4a"]);
         let snap = h.lib.snapshot();
         let d = &snap.downloads["a"];
@@ -582,7 +586,7 @@ mod tests {
         let mut t = track("a");
         t.thumbnail = None;
         let id = h.mgr.download(t).unwrap();
-        h.wait("completed", |s| state_of(s, id) == JobState::Completed).await;
+        h.wait("completed", |s| finished(s, id)).await;
         assert_eq!(h.files(), ["Artist - Title a (2).m4a", "Artist - Title a.m4a"]);
         assert_eq!(std::fs::read(h.dir.path().join("Artist - Title a.m4a")).unwrap(), b"other track");
     }
@@ -623,9 +627,23 @@ mod tests {
         assert!(matches!(state_of(&s, id), JobState::Failed(m) if m.contains("connection reset")));
         assert!(h.files().is_empty(), "no partial file after failure");
         h.mgr.retry(id);
-        h.wait("completed", |s| state_of(s, id) == JobState::Completed).await;
+        h.wait("completed", |s| finished(s, id)).await;
         assert_eq!(h.backend.calls.lock().unwrap()["a"], 2);
         assert!(h.lib.snapshot().is_downloaded("a"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn finished_downloads_leave_the_list_failed_ones_stay() {
+        let mut h = harness(3);
+        h.backend.fail_once.lock().unwrap().insert("a".into());
+        let (mut a, mut b) = (track("a"), track("b"));
+        a.thumbnail = None;
+        b.thumbnail = None;
+        let a = h.mgr.download(a).unwrap();
+        let b = h.mgr.download(b).unwrap();
+        h.wait("b finished, a failed", |s| finished(s, b) && matches!(state_of(s, a), JobState::Failed(_))).await;
+        assert!(h.lib.snapshot().is_downloaded("b"), "listed with the downloaded tracks");
+        assert_eq!(h.mgr.state().jobs.len(), 1, "only the failed job remains");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -662,7 +680,7 @@ mod tests {
         h.backend.hold.lock().unwrap().remove("d");
         let d = s.jobs.iter().find(|j| j.track.video_id == "d").unwrap().id;
         h.mgr.retry(d);
-        h.wait("d completed", |s| s.jobs.iter().any(|j| j.id == d && j.state == JobState::Completed)).await;
+        h.wait("d completed", |s| finished(s, d)).await;
         assert_eq!(h.mgr.state().notice.as_ref().map(|n| n.seq), Some(1), "no new notice");
     }
 
@@ -708,7 +726,7 @@ mod tests {
         t.thumbnail = None;
         h.lib.add_tracks(pl, &[t.clone()]).unwrap();
         let id = h.mgr.download(t).unwrap();
-        h.wait("completed", |s| state_of(s, id) == JobState::Completed).await;
+        h.wait("completed", |s| finished(s, id)).await;
         h.mgr.delete("a").await.unwrap();
         assert!(h.files().is_empty());
         let snap = h.lib.snapshot();
@@ -728,12 +746,11 @@ mod tests {
         let mgr = Manager::new(backend, lib.clone(), downloads, 3, Notifier::noop());
         let id = mgr.download(song.clone()).unwrap();
         let mut rx = mgr.subscribe();
-        let s = tokio::time::timeout(Duration::from_secs(120), rx.wait_for(|s| !s.jobs[0].state.is_active()))
+        tokio::time::timeout(Duration::from_secs(120), rx.wait_for(|s| s.jobs.iter().all(|j| j.id != id || !j.state.is_active())))
             .await
             .unwrap()
-            .unwrap()
-            .clone();
-        assert_eq!(state_of(&s, id), JobState::Completed);
+            .unwrap();
+        assert!(finished(&mgr.state(), id), "failed: {:?}", mgr.state());
         let path = lib.snapshot().downloads[&song.video_id].path.clone();
         let file = lofty::read_from_path(&path).unwrap();
         use lofty::prelude::*;
