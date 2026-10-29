@@ -18,7 +18,7 @@
 
 - [x] 4.1 Describe the bot-check behavior (playback stops, downloads stop, try again later, no automatic resume) in the README next to the existing bot-check note; verify it matches the delta specs
 - [x] 4.2 Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`, push, and confirm CI is green on Linux and Windows
-- [ ] 4.3 Bump the workspace version to 0.1.1, push tag `v0.1.1`, and verify `gh release view v0.1.1` lists `koi-music-0.1.1-windows-x86_64.zip` and that it downloads without authentication
+- [x] 4.3 Bump the workspace version to 0.1.1, push tag `v0.1.1`, and verify `gh release view v0.1.1` lists `koi-music-0.1.1-windows-x86_64.zip` and that it downloads without authentication
 
 ## Workflow follow-up
 
