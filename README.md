@@ -7,9 +7,11 @@ No account, no browser tab, no ads.
 - Audio-only streaming with a play queue, shuffle, repeat, seek and volume
 - Local playlists (stored in SQLite), saving YouTube Music albums/playlists as local playlists, "Recently played"
 - Downloads as tagged M4A files (title, artist, album, cover) that play offline
-- Media keys and now-playing info via MPRIS (Linux)
+- Media keys and now-playing info (MPRIS on Linux, system media controls on Windows)
 
-Linux is the primary platform. macOS and Windows may work but are not tested yet.
+Platforms: **Linux** (x86_64) and **Windows 10/11** (x86_64). Windows builds and tests run in CI
+on every push, but the Windows app has not been manually verified yet (playback, media keys, fonts,
+downloads). Reports welcome. macOS is not supported.
 
 > **Personal use only.** Streaming and downloading via unofficial APIs may conflict with YouTube's Terms of Service.
 > koi-music is an independent project. It is not affiliated with, endorsed by, or sponsored by Google or YouTube.
@@ -41,6 +43,22 @@ pipx install yt-dlp && curl -fsSL https://deno.land/install.sh | sh
 # Nix
 nix profile install nixpkgs#yt-dlp nixpkgs#deno nixpkgs#ffmpeg
 ```
+
+## Windows
+
+1. Download `koi-music-<version>-windows-x86_64.zip` from the
+   [releases page](https://github.com/KeeTraxx/koi-music/releases) and extract it anywhere.
+2. Install yt-dlp and Deno (ffmpeg is optional):
+   ```powershell
+   winget install yt-dlp.yt-dlp DenoLand.Deno
+   winget install Gyan.FFmpeg   # optional
+   ```
+   Open a new terminal or sign out and in so the updated `PATH` is picked up. Keep yt-dlp current
+   with `winget upgrade yt-dlp.yt-dlp`.
+3. Start `koi-music.exe`. The binary is not code-signed, so Windows SmartScreen may show
+   "Windows protected your PC": choose **More info → Run anyway**.
+
+If yt-dlp is installed somewhere not on `PATH`, set the full path to `yt-dlp.exe` in *Settings*.
 
 ## Building
 
@@ -87,6 +105,10 @@ install -Dm644 ch.compile.koi-music.desktop ~/.local/share/applications/ch.compi
 | Library (playlists, history, downloads, settings) | `~/.local/share/koi-music/library.db` |
 | YouTube client cache | `~/.local/share/koi-music/rustypipe/` |
 | Downloads (default, configurable) | `~/Music/koi-music/` |
+
+On Windows the library and client cache live in `%APPDATA%\compile\koi-music\data\`, other
+caches in `%LOCALAPPDATA%\compile\koi-music\cache\`, and downloads go to `koi-music` in your
+Music folder.
 
 ## Project layout
 

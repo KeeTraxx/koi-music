@@ -15,3 +15,6 @@ egui_extras = { version = "0.37", features = ["http", "image", "webp"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 egui_dnd = "0.18"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"

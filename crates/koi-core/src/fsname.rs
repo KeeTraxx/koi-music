@@ -4,7 +4,15 @@ use std::path::{Path, PathBuf};
 
 const MAX_STEM_CHARS: usize = 180;
 
-/// Replace characters that are unsafe in file names on common file systems.
+/// Device names Windows reserves, with or without an extension (`CON`, `nul.txt`, ...).
+const WINDOWS_RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1",
+    "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Replace characters that are unsafe in file names on common file systems, and
+/// avoid names Windows rejects (reserved device names, trailing dots or spaces).
+/// Applied on every platform so files stay valid when copied to Windows.
 pub fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -15,9 +23,16 @@ pub fn sanitize(name: &str) -> String {
         })
         .collect();
     let trimmed = cleaned.trim().trim_matches('.').trim();
-    let mut out: String = trimmed.chars().take(MAX_STEM_CHARS).collect();
+    let truncated: String = trimmed.chars().take(MAX_STEM_CHARS).collect();
+    // Truncation can leave a trailing dot or space again.
+    let mut out = truncated.trim_end_matches(['.', ' ']).to_owned();
     if out.is_empty() {
         out.push_str("untitled");
+    }
+    let base_len = out.find('.').unwrap_or(out.len());
+    let base = out[..base_len].trim_end();
+    if WINDOWS_RESERVED.iter().any(|r| r.eq_ignore_ascii_case(base)) {
+        out.insert(base.len(), '_');
     }
     out
 }
@@ -64,8 +79,31 @@ mod tests {
     }
 
     #[test]
+    fn avoids_windows_reserved_names() {
+        assert_eq!(sanitize("CON"), "CON_");
+        assert_eq!(sanitize("con"), "con_");
+        assert_eq!(sanitize("nul.m4a"), "nul_.m4a");
+        assert_eq!(sanitize("Aux.live"), "Aux_.live");
+        assert_eq!(sanitize("COM1"), "COM1_");
+        assert_eq!(sanitize("lpt9.x"), "lpt9_.x");
+        // Not reserved: longer names, COM0/COM10, reserved word inside a name.
+        assert_eq!(sanitize("CONTROL"), "CONTROL");
+        assert_eq!(sanitize("COM10"), "COM10");
+        assert_eq!(sanitize("COM0"), "COM0");
+        assert_eq!(sanitize("Con Funk Shun - Love's Train"), "Con Funk Shun - Love's Train");
+        assert_eq!(track_stem("Blender Foundation", "Big Buck Bunny"), "Blender Foundation - Big Buck Bunny");
+    }
+
+    #[test]
+    fn truncation_leaves_no_trailing_dot_or_space() {
+        let name = format!("{} . x", "a".repeat(MAX_STEM_CHARS - 2));
+        let out = sanitize(&name);
+        assert!(!out.ends_with(['.', ' ']), "{out:?}");
+    }
+
+    #[test]
     fn stem_format() {
-        assert_eq!(track_stem("Daft Punk", "Around the World"), "Daft Punk - Around the World");
+        assert_eq!(track_stem("Blender Foundation", "Big Buck Bunny"), "Blender Foundation - Big Buck Bunny");
     }
 
     #[test]

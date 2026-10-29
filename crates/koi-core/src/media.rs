@@ -1,6 +1,11 @@
-//! OS media controls (MPRIS on Linux) via `souvlaki`: media keys and now-playing metadata.
+//! OS media controls via `souvlaki` (MPRIS on Linux, System Media Transport Controls on
+//! Windows): media keys and now-playing metadata.
+//!
+//! The session lives on the UI thread: Windows needs the app's window handle and the
+//! controls must be used from the thread that owns the window. The UI calls
+//! [`MediaSession::update`] on every repaint; the player requests one on each change.
 
-use std::sync::Arc;
+use std::ffi::c_void;
 use std::time::Duration;
 
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection};
@@ -9,37 +14,41 @@ use crate::player::{Player, PlayerCmd, PlayerState, Status};
 
 const SEEK_STEP: Duration = Duration::from_secs(10);
 
-/// Register with the OS and keep it in sync with the player until the runtime shuts down.
-/// Failures (e.g. no D-Bus session) are logged; the app works without media keys.
-pub fn start(player: Player, rt: &tokio::runtime::Handle) {
-    let config = PlatformConfig { dbus_name: "koi_music", display_name: "koi-music", hwnd: None };
-    let mut controls = match MediaControls::new(config) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("media controls unavailable: {e:?}");
+pub struct MediaSession {
+    controls: MediaControls,
+    /// Track and status last sent to the OS.
+    last: Option<(Option<String>, Status)>,
+}
+
+impl MediaSession {
+    /// Register with the OS. `hwnd` is the Win32 window handle (required on Windows,
+    /// ignored elsewhere). Returns `None` when the platform service is unavailable
+    /// (e.g. no D-Bus session); the app works without media keys.
+    pub fn new(player: Player, hwnd: Option<*mut c_void>) -> Option<Self> {
+        let config = PlatformConfig { dbus_name: "koi_music", display_name: "koi-music", hwnd };
+        let mut controls = match MediaControls::new(config) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("media controls unavailable: {e:?}");
+                return None;
+            }
+        };
+        if let Err(e) = controls.attach(move |event| on_event(&player, event)) {
+            tracing::warn!("cannot attach media controls: {e:?}");
+            return None;
+        }
+        Some(Self { controls, last: None })
+    }
+
+    /// Publish metadata and playback status when the track or status changed.
+    pub fn update(&mut self, s: &PlayerState) {
+        let key = (s.current_track().map(|t| t.video_id.clone()), s.status);
+        if self.last.as_ref() == Some(&key) {
             return;
         }
-    };
-    let handler_player = player.clone();
-    if let Err(e) = controls.attach(move |event| on_event(&handler_player, event)) {
-        tracing::warn!("cannot attach media controls: {e:?}");
-        return;
+        self.last = Some(key);
+        sync(&mut self.controls, s);
     }
-    let mut state = player.subscribe();
-    rt.spawn(async move {
-        let mut last: Option<(Option<String>, Status)> = None;
-        loop {
-            let snap = state.borrow_and_update().clone();
-            let key = (snap.current_track().map(|t| t.video_id.clone()), snap.status);
-            if last.as_ref() != Some(&key) {
-                sync(&mut controls, &snap);
-                last = Some(key);
-            }
-            if state.changed().await.is_err() {
-                break;
-            }
-        }
-    });
 }
 
 fn on_event(player: &Player, event: MediaControlEvent) {
@@ -68,7 +77,7 @@ fn on_event(player: &Player, event: MediaControlEvent) {
     player.send(cmd);
 }
 
-fn sync(controls: &mut MediaControls, s: &Arc<PlayerState>) {
+fn sync(controls: &mut MediaControls, s: &PlayerState) {
     if let Some(t) = s.current_track() {
         let artist = t.artist_line();
         let meta = MediaMetadata {

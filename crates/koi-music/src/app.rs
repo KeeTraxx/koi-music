@@ -8,6 +8,7 @@ use koi_core::app::{AppCore, ToolProbe};
 use koi_core::import::{RemoteCollection, import_collection};
 use koi_core::library::{EntryId, Library, LibrarySnapshot, PlaylistId};
 use koi_core::model::Track;
+use koi_core::media::MediaSession;
 use koi_core::player::{PlayerCmd, PlayerState};
 use tokio::sync::mpsc;
 
@@ -100,10 +101,12 @@ pub struct KoiMusicApp {
     toast_tx: mpsc::UnboundedSender<String>,
     toast_rx: mpsc::UnboundedReceiver<String>,
     last_error_seq: u64,
+    /// OS media controls; `None` when the platform service is unavailable.
+    media: Option<MediaSession>,
 }
 
 impl KoiMusicApp {
-    pub fn new(core: AppCore, ctx: egui::Context) -> Self {
+    pub fn new(core: AppCore, ctx: egui::Context, media: Option<MediaSession>) -> Self {
         let (toast_tx, toast_rx) = mpsc::unbounded_channel();
         let sp = Spawner { rt: core.rt.clone(), ctx };
         Self {
@@ -119,6 +122,7 @@ impl KoiMusicApp {
             toast_tx,
             toast_rx,
             last_error_seq: 0,
+            media,
         }
     }
 
@@ -390,6 +394,14 @@ fn validation_message(e: &koi_core::Error) -> String {
 }
 
 impl eframe::App for KoiMusicApp {
+    /// Runs on every repaint, also while the window is hidden; the player requests a
+    /// repaint on each state change, so the OS media controls stay current.
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(media) = &mut self.media {
+            media.update(&self.core.player.state());
+        }
+    }
+
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let lib = self.core.library.snapshot();

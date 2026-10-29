@@ -118,18 +118,31 @@ impl YtDlp {
         *self.bin.write().unwrap() = bin.into();
     }
 
-    fn command(&self) -> Command {
+    /// A yt-dlp process that ignores the user's yt-dlp config (so our output format and
+    /// paths are predictable; plugins such as PO-token providers still load) and, on
+    /// Windows, opens no console window.
+    fn base_command(&self) -> Command {
         let mut c = Command::new(self.bin());
-        // Ignore the user's yt-dlp config so our output format and paths are predictable.
-        // Plugins (e.g. PO-token providers) still load.
-        c.args(["--ignore-config", "--no-playlist", "--no-warnings"]).stdin(Stdio::null()).kill_on_drop(true);
+        c.arg("--ignore-config").stdin(Stdio::null()).kill_on_drop(true);
+        #[cfg(windows)]
+        {
+            /// `CREATE_NO_WINDOW`: a GUI app starting a console program would otherwise flash a console.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c
+    }
+
+    fn command(&self) -> Command {
+        let mut c = self.base_command();
+        c.args(["--no-playlist", "--no-warnings"]);
         c
     }
 
     /// `yt-dlp --version`, or `MissingTool` if it cannot be run.
     pub async fn version(&self) -> Result<String> {
         let bin = self.bin();
-        let out = Command::new(&bin).args(["--ignore-config", "--version"]).output().await.map_err(|e| {
+        let out = self.base_command().arg("--version").output().await.map_err(|e| {
             Error::new(ErrorKind::MissingTool, format!("yt-dlp could not be started ({}): {e}", bin.display()))
         })?;
         if !out.status.success() {
@@ -142,7 +155,7 @@ impl YtDlp {
     pub async fn probe(&self) -> Result<ToolStatus> {
         let version = self.version().await?;
         // Without a URL yt-dlp prints its debug header and exits with an error; no network access.
-        let js_runtimes = match Command::new(self.bin()).args(["-v", "--ignore-config"]).stdin(Stdio::null()).output().await {
+        let js_runtimes = match self.base_command().arg("-v").output().await {
             Ok(out) => parse_js_runtimes(&String::from_utf8_lossy(&out.stderr)),
             Err(_) => Vec::new(),
         };
