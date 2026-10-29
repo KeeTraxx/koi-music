@@ -18,7 +18,7 @@
 
 - [x] 3.1 Add `.github/workflows/ci.yml` with the Linux + Windows matrix running clippy (`-D warnings`) and `cargo test --workspace` (design D1); verify locally that the same commands pass on Linux and the workflow file passes `actionlint` (or a YAML parse)
 - [x] 3.2 Push and get both CI jobs green, fixing any Windows build or test failures (native dependencies per the design's risk mitigations, path or line-ending issues in tests); verify with `gh run list` / `gh run view` showing a successful run on both platforms
-- [ ] 3.3 Run CI on branch pushes and pull requests only, not on tag pushes (design D1); verify the workflow parses and a tag push starts only the Release workflow while a branch push still starts CI
+- [x] 3.3 Run CI on branch pushes and pull requests only, not on tag pushes (design D1); verify the workflow parses and a tag push starts only the Release workflow while a branch push still starts CI
 
 ## 4. Release and documentation
 
